@@ -1,13 +1,13 @@
 #--------------------------- Title ---------------------------------------------
   
-  ## Project: ML_KR_Project.Rproj
+  ## Project: ML_R_Project.Rproj
   ## Script:  H-O_ML_Random_Forests.R
   
   ## Programmer: Christopher Griffin
   ## Creation Date: 4/21/2024
-  ## Edit Date:  4/21/2024
+  ## Edit Date:  4/27/2024
   ## Notes: This is the tutorial for random forests from Hands-on Machine 
-  ## Learning with R
+  ## Learning with R https://bradleyboehmke.github.io/HOML/random-forest.html#hyperparameters
   
 #-------------------------------------------------------------------------------
 
@@ -43,12 +43,15 @@ library(ggplot2)  # for awesome graphics
 # install.packages("ranger")
 # install.packages("h2o")
 # install.packages("tidymodels")
+# install.packages("vip")
+# install.packages("grid")
 
 # Modeling packages
 library(ranger)   # a c++ implementation of random forest 
 library(h2o)      # a java-based implementation of random forest
 library(tidymodels) # for the ames housing dataset.
-
+library(vip)
+library(gridExtra)
 
 #-------------------------------------------------------------------------------
 
@@ -133,13 +136,13 @@ ames_rf1 <- ranger(
 #-------------------------------------------------------------------------------
 
 # create hyperparameter grid
-1/(sqrt(n_features))
+sqrt_feature <- 1/(sqrt(n_features))
 
 hyper_grid <- expand.grid(
-  mtry = floor(n_features * c(.05, .117, .15, .25, .333, .4)),
+  mtry = floor(n_features * c(.05, sqrt_feature, .15, .25, .333, .4)),
   min.node.size = c(1, 3, 5, 10), 
   replace = c(TRUE, FALSE),                               
-  sample.fraction = c(.5, .63, .8),                       
+  sample.fraction = c(.25, .5, .63, .8, 1),                       
   rmse = NA                                               
 )
 
@@ -167,6 +170,90 @@ hyper_grid %>%
   arrange(rmse) %>%
   mutate(perc_gain = (default_rmse - rmse) / default_rmse * 100) %>%
   head(10)
+
+optimal_rf <- hyper_grid %>%
+  arrange(rmse) %>%
+  mutate(perc_gain = (default_rmse - rmse) / default_rmse * 100) %>%
+  head(1)
+
+optimal_rf$mtry
+
+#-------------------------------------------------------------------------------
+
+## 11.6 Feature interpretation
+
+#-------------------------------------------------------------------------------
+# re-run model with impurity-based variable importance
+rf_impurity <- ranger(
+  formula = Sale_Price ~ .,
+  data = ames_train,
+  num.trees = 2000,
+  mtry = 32,
+  min.node.size = 1,
+  sample.fraction = .80,
+  replace = FALSE,
+  importance = "impurity",
+  respect.unordered.factors = "order",
+  verbose = FALSE,
+  seed = 123
+)
+
+# the same re-run with impurity-based var importance but auto drawing from optimal model
+rf_impurity_auto <- ranger(
+  formula = Sale_Price ~ .,
+  data = ames_train,
+  num.trees = 2000,
+  mtry = optimal_rf$mtry,
+  min.node.size = optimal_rf$min.node.size,
+  sample.fraction = optimal_rf$sample.fraction,
+  replace = optimal_rf$replace,
+  importance = "impurity",
+  respect.unordered.factors = "order",
+  verbose = FALSE,
+  seed = 123
+)
+
+# re-run model with permutation-based variable importance
+rf_permutation <- ranger(
+  formula = Sale_Price ~ ., 
+  data = ames_train, 
+  num.trees = 2000,
+  mtry = 32,
+  min.node.size = 1,
+  sample.fraction = .80,
+  replace = FALSE,
+  importance = "permutation",
+  respect.unordered.factors = "order",
+  verbose = FALSE,
+  seed  = 123
+)
+
+# the same re-run with permutation-based var importance but auto drawing from optimal model
+rf_permutation_auto <- ranger(
+  formula = Sale_Price ~ .,
+  data = ames_train,
+  num.trees = 2000,
+  mtry = optimal_rf$mtry,
+  min.node.size = optimal_rf$min.node.size,
+  sample.fraction = optimal_rf$sample.fraction,
+  replace = optimal_rf$replace,
+  importance = "permutation",
+  respect.unordered.factors = "order",
+  verbose = FALSE,
+  seed = 123
+)
+
+p1 <- vip::vip(rf_impurity, num_features = 25, bar = FALSE)
+p2 <- vip::vip(rf_permutation, num_features = 25, bar = FALSE)
+
+gridExtra::grid.arrange(p1, p2, nrow = 1)
+
+p1_auto <- vip::vip(rf_impurity_auto, num_features = 25, bar = FALSE)
+p2_auto <- vip::vip(rf_permutation_auto, num_features = 25, bar = FALSE)
+
+gridExtra::grid.arrange(p1_auto, p2_auto, nrow = 1)
+
+pred_rf <- predict(rf_permutation_auto, data = ames_test, seed = 123)
 
 #-------------------------------------------------------------------------------
 
@@ -244,3 +331,6 @@ random_grid_perf <- h2o.getGrid(
   decreasing = FALSE
 )
 random_grid_perf
+
+
+
